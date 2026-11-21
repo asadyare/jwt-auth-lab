@@ -1,0 +1,4 @@
+U=http://localhost:8080/realms/lab7/protocol/openid-connect
+steal() { ACCESS=$(python3 -c "import json;print(json.load(open('/tmp/tok.json'))['access_token'])"); REFRESH=$(python3 -c "import json;print(json.load(open('/tmp/tok.json'))['refresh_token'])"); rm /tmp/tok.json; echo "stolen: access ${#ACCESS} chars, refresh ${#REFRESH} chars"; }
+userinfo() { curl -s -o /dev/null -w "userinfo: %{http_code}\n" -H "Authorization: Bearer $ACCESS" $U/userinfo; }
+refresh() { curl -s -o /tmp/r.json -w "refresh: %{http_code}\n" $U/token -d grant_type=refresh_token -d client_id=lab7-app -d refresh_token="$REFRESH"; python3 -c "import json;t=json.load(open('/tmp/r.json'));print(' ',t.get('error_description','new tokens issued'))"; NEW=$(python3 -c "import json;print(json.load(open('/tmp/r.json')).get('access_token',''))"); [ -n "$NEW" ] && ACCESS=$NEW; rm -f /tmp/r.json; }

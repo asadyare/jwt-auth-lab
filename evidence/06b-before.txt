@@ -1,0 +1,11 @@
+1. Login:                                   200
+2. /me with access token A1:                200
+3. Refresh with R1 (rotates to A2 + R2):    404
+4. Attacker reuses old R1:                  404
+5. Real user's R2 after reuse detected:     404
+6. /me with A2 after reuse detected:        401
+7. Fresh login:                             200
+8. POST /logout with A3:                    204
+9. Refresh with R3 after logout:            404
+10. Normal login then refresh:              404
+11. Made-up refresh token:                  404

@@ -1,0 +1,6 @@
+Lab 3 curl tests, 12 Nov 2026 (status codes only, no tokens)
+register alice: {"username":"alice"}
+right token: 200
+no token: 401
+tampered token: 401
+wrong password: 401

@@ -1,0 +1,12 @@
+Lab 4 access control tests, 12 Nov 2026 (status codes only; no tokens or passwords)
+Tested with lab4-test.sh using throwaway test users alice and bob, plus admin
+
+BEFORE the fix (no ownership or role checks)
+bob reads alice note:  200
+bob lists users:       200
+
+AFTER the fix (server-side ownership and role checks)
+alice reads own note:  200
+bob reads alice note:  404
+bob lists users:       403
+admin lists users:     200

@@ -1,0 +1,9 @@
+Lab 7 Part A - authorisation code + PKCE + OIDC (Keycloak 26, realm lab7, client lab7-app)
+exchange (correct verifier): 200
+state ok: yes
+nonce matches: True
+id_token     typ=ID     aud=lab7-app azp=lab7-app has_nonce=True
+access_token typ=Bearer aud=account  azp=lab7-app has_nonce=False
+replay same code: 400 invalid_grant "Code not valid"
+wrong verifier (fresh code): 400 invalid_grant "PKCE verification failed: Code mismatch"
+redirect_uri=http://localhost:9999/steal: Keycloak "Invalid parameter: redirect_uri" (no code issued)

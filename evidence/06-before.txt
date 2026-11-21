@@ -1,0 +1,11 @@
+1. Session A /me before logout:           200
+2. Session A POST /logout:                404
+3. Stolen copy of A replayed:             200
+4. Session B still works:                 200
+5. Session B POST /logout-all:            404
+6. Session B after logout-all:            200
+7. Fresh login after logout-all:          200
+
+Login timing (seconds, 5 tries each):
+  known username, wrong password: 0.056995 0.054560 0.054444 0.053882 0.053782
+  unknown username, wrong password: 0.000941 0.000979 0.000850 0.000929 0.000908

@@ -1,0 +1,4 @@
+Lab 7 Part B - MFA vs an already-stolen token
+stolen before MFA:            not recorded
+after OTP enabled for alice:  refresh 200 (new tokens issued) | userinfo 200
+after all sessions signed out: refresh 400 "Session not active" | userinfo 401

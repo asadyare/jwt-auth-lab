@@ -1,0 +1,7 @@
+Lab 5 - Token replay against GET /me (16 Nov 2026, 127.0.0.1:8000)
+Status codes only. No token values recorded.
+
+1. Replay with copied token                  -> 200
+2. After client-side logout (unset TOKEN)    -> 200
+3. After server restart                      -> 200
+4. After token expiry (exp = 15 min)         -> 401
