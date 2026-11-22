@@ -1,8 +1,14 @@
 import hashlib
+import json
+import logging
 import os
 import secrets
+import tempfile
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import jwt
 from argon2 import PasswordHasher
@@ -18,6 +24,10 @@ ALGORITHM = "HS256"
 ISSUER = "jwt-auth-lab"
 AUDIENCE = "jwt-auth-lab-api"
 TOKEN_MINUTES = 15
+# Where users and revocation state survive a restart. Gitignored; never commit it.
+STATE_FILE = Path(os.environ.get("STATE_FILE", "state/state.json"))
+# Security events go to the server log, never to the client.
+security_log = logging.getLogger("jwt_auth_lab.security")
 
 app = FastAPI(title="jwt-auth-lab")
 hasher = PasswordHasher()  # Argon2id by default
@@ -44,6 +54,7 @@ def register(c: Credentials):
     if c.username in users:
         raise HTTPException(409, "User already exists")
     users[c.username] = {"hash": hasher.hash(c.password), "role": "user", "token_version": 0}
+    save_state()
     return {"username": c.username}
 
 
@@ -94,6 +105,7 @@ def issue_tokens(username: str, family: str | None = None) -> dict:
         "exp": now + timedelta(days=REFRESH_DAYS),
         "used": False,
     }
+    save_state()
     return {
         "access_token": jwt.encode(claims, SECRET, algorithm=ALGORITHM),
         "refresh_token": refresh,
@@ -131,11 +143,86 @@ def me(claims: dict = Depends(current_user)):
     return {"username": claims["sub"], "role": claims["role"]}
 
 
-# ---------- Lab 4: notes, roles and ownership ----------
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
-if ADMIN_PASSWORD and "admin" not in users:
-    users["admin"] = {"hash": hasher.hash(ADMIN_PASSWORD), "role": "admin", "token_version": 0}
+# ---------- Gap fix (22 Nov 2026): state that survives a restart ----------
+# Before this, a restart wiped revoked_jtis, refresh_tokens and revoked_families,
+# and re-created admin with token_version 0, which brought revoked admin tokens back.
+_save_lock = threading.Lock()
 
+
+def save_state() -> None:
+    """Write users and revocation stores to STATE_FILE atomically, readable by the owner only.
+
+    Only Argon2 hashes and SHA-256 fingerprints of refresh tokens are written, never raw tokens.
+    """
+    data = {
+        "users": users,
+        "revoked_jtis": revoked_jtis,
+        "revoked_families": sorted(revoked_families),
+        "refresh_tokens": {
+            fp: {**rec, "exp": rec["exp"].isoformat()} for fp, rec in refresh_tokens.items()
+        },
+    }
+    with _save_lock:
+        STATE_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # mkstemp creates the temp file with mode 0600; os.replace swaps it in atomically,
+        # so a crash mid-write never leaves a half-written state file.
+        fd, tmp = tempfile.mkstemp(dir=STATE_FILE.parent, prefix=".state-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, STATE_FILE)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+
+
+def load_state() -> None:
+    """Replace the in-memory stores with what is in STATE_FILE (nothing happens if it is missing)."""
+    for store in (users, revoked_jtis, refresh_tokens):
+        store.clear()
+    revoked_families.clear()
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text())
+        users.update(data["users"])
+        revoked_jtis.update({jti: int(exp) for jti, exp in data["revoked_jtis"].items()})
+        revoked_families.update(data["revoked_families"])
+        for fp, rec in data["refresh_tokens"].items():
+            refresh_tokens[fp] = {**rec, "exp": datetime.fromisoformat(rec["exp"])}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        # Fail closed: starting with empty revocation lists would bring revoked tokens back.
+        raise RuntimeError("State file is unreadable; refusing to start without revocation state") from None
+    prune_revoked_jtis()
+
+
+def prune_revoked_jtis(now: float | None = None) -> None:
+    """Forget revoked token IDs whose token has expired: jwt.decode already rejects those."""
+    now = time.time() if now is None else now
+    for jti in [j for j, exp in revoked_jtis.items() if exp < now]:
+        del revoked_jtis[jti]
+
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
+
+def seed_admin() -> None:
+    """Create admin only if missing, so a restart never resets admin's token_version."""
+    if ADMIN_PASSWORD and "admin" not in users:
+        users["admin"] = {"hash": hasher.hash(ADMIN_PASSWORD), "role": "admin", "token_version": 0}
+        save_state()
+
+
+def startup() -> None:
+    """What a fresh process does: load saved state, then seed admin if it is not there."""
+    load_state()
+    seed_admin()
+
+
+# ---------- Lab 4: notes, roles and ownership ----------
 notes: dict[int, dict] = {}  # note_id -> {"owner": ..., "text": ...}
 
 
@@ -157,6 +244,7 @@ def read_note(note_id: int, claims: dict = Depends(current_user)):
         raise HTTPException(404, "Not found")
     if note["owner"] != claims["sub"] and claims.get("role") != "admin":
         raise HTTPException(404, "Not found")
+    return note
 
 
 @app.get("/admin/users")
@@ -173,6 +261,8 @@ def logout(claims: dict = Depends(current_user)):
     revoked_jtis[claims["jti"]] = claims["exp"]
     if claims.get("fam"):
         revoked_families.add(claims["fam"])
+    prune_revoked_jtis()
+    save_state()
 
 
 @app.post("/logout-all", status_code=204)
@@ -182,6 +272,7 @@ def logout_all(claims: dict = Depends(current_user)):
     for rec in refresh_tokens.values():
         if rec["user"] == claims["sub"]:
             revoked_families.add(rec["family"])
+    save_state()
 
 
 class RefreshIn(BaseModel):
@@ -206,6 +297,17 @@ def refresh(r: RefreshIn):
         # family and every access token the user holds.
         revoked_families.add(rec["family"])
         users[rec["user"]]["token_version"] += 1
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token reuse detected")
+        save_state()
+        # Alert on the server only. The token itself is never logged, and %r escapes
+        # newlines in the username so it can't forge extra log lines.
+        security_log.warning(
+            "ALERT refresh token reuse: user=%r family=%s; family revoked and access tokens invalidated",
+            rec["user"], rec["family"],
+        )
+        # Same refusal as any other bad refresh token, so a thief can't tell they were caught.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
     rec["used"] = True
     return issue_tokens(rec["user"], rec["family"])
+
+
+startup()

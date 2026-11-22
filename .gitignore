@@ -3,3 +3,6 @@
 *.pem
 __pycache__/
 *.log
+state/
+.pytest_cache/
+*.key

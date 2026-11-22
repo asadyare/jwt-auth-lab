@@ -1,0 +1,49 @@
+# pytest, 22 Nov 2026 (Europe/London), Python 3.12.16, fresh venv from requirements.txt
+$ python -m pytest -q -rA
+PASSED tests/test_security.py::test_valid_login_reaches_me
+PASSED tests/test_security.py::test_wrong_password_and_unknown_user_look_the_same
+PASSED tests/test_security.py::test_password_is_not_stored_in_plaintext
+PASSED tests/test_security.py::test_missing_token_rejected
+PASSED tests/test_security.py::test_bad_tokens_rejected[tampered-None]
+PASSED tests/test_security.py::test_bad_tokens_rejected[wrong_issuer-<lambda>]
+PASSED tests/test_security.py::test_bad_tokens_rejected[wrong_audience-<lambda>]
+PASSED tests/test_security.py::test_bad_tokens_rejected[expired-<lambda>]
+PASSED tests/test_security.py::test_bad_tokens_rejected[missing_jti-<lambda>]
+PASSED tests/test_security.py::test_bad_tokens_rejected[wrong_secret-<lambda>]
+PASSED tests/test_security.py::test_bad_tokens_rejected[alg_none-<lambda>]
+PASSED tests/test_security.py::test_bola_other_users_note_hidden
+PASSED tests/test_security.py::test_bfla_user_cannot_list_users
+PASSED tests/test_security.py::test_admin_can_list_users
+PASSED tests/test_security.py::test_role_claim_cannot_be_self_promoted
+PASSED tests/test_security.py::test_stolen_token_dies_after_logout
+PASSED tests/test_security.py::test_logout_all_kills_other_sessions
+PASSED tests/test_security.py::test_token_for_deleted_user_rejected
+PASSED tests/test_security.py::test_refresh_rotates_and_is_single_use
+PASSED tests/test_security.py::test_refresh_reuse_kills_family_and_access_tokens
+PASSED tests/test_security.py::test_logout_revokes_refresh_family
+PASSED tests/test_security.py::test_garbage_refresh_token_rejected
+PASSED tests/test_security.py::test_owner_reads_own_note_text
+PASSED tests/test_security.py::test_refresh_reuse_looks_like_any_invalid_token_and_alerts
+PASSED tests/test_security.py::test_restart_does_not_revive_admin_tokens
+PASSED tests/test_security.py::test_restart_keeps_logout_and_refresh_revocation
+PASSED tests/test_security.py::test_admin_seed_never_lowers_token_version
+PASSED tests/test_security.py::test_state_file_is_private_and_holds_no_raw_tokens
+PASSED tests/test_security.py::test_corrupt_state_file_fails_closed
+PASSED tests/test_security.py::test_expired_revoked_jtis_are_pruned
+30 passed, 1 warning in 3.50s
+
+$ pip-audit -r requirements.txt
+No known vulnerabilities found
+
+# Regression proof: each new fix removed on purpose, then restored
+| Fix removed on purpose | Test(s) that failed | Result |
+|---|---|---|
+| Uniform "Invalid refresh token" on reuse | test_refresh_reuse_kills_family_and_access_tokens, test_refresh_reuse_looks_like_any_invalid_token_and_alerts | 2 failed, 28 passed |
+| ALERT log on reuse | test_refresh_reuse_looks_like_any_invalid_token_and_alerts | 1 failed, 29 passed |
+| save_state() (no persistence) | test_restart_does_not_revive_admin_tokens, test_restart_keeps_logout_and_refresh_revocation, test_admin_seed_never_lowers_token_version, test_state_file_is_private_and_holds_no_raw_tokens | 4 failed, 26 passed |
+| "admin not in users" guard on seeding | test_restart_does_not_revive_admin_tokens, test_admin_seed_never_lowers_token_version | 2 failed, 28 passed |
+| return note | test_owner_reads_own_note_text | 1 failed, 29 passed |
+| prune_revoked_jtis() on logout | test_expired_revoked_jtis_are_pruned | 1 failed, 29 passed |
+| Fail closed on corrupt state file | test_corrupt_state_file_fails_closed | 1 failed, 29 passed |
+| State file mode 0600 (changed to 0644) | test_state_file_is_private_and_holds_no_raw_tokens | 1 failed, 29 passed |
+After restoring every fix: 30 passed.
